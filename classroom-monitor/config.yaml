@@ -1,0 +1,57 @@
+camera:
+  source: 0                        # webcam index or RTSP URL string
+  width: 640
+  height: 480
+  fps: 30
+  queue_depth: 4
+
+model:
+  weights: models/behaviour_detector.pt   # trained YOLOv8 weights
+  confidence_threshold: 0.40
+  iou_threshold: 0.45
+  imgsz: 640
+  device: ""                       # "" = auto (cpu on Pi, mps/cuda on Mac)
+
+tracking:
+  tracker: botsort                  # bytetrack or botsort
+  tracker_config: trackers/botsort_reid.yaml   # custom: with_reid + wider track_buffer (see file)
+  max_ids: 50
+  track_expiry_frames: 90           # was 30 — more tolerance for brief detection gaps before a track is dropped
+
+behaviour:
+  smoothing_window: 5              # mode over last N predictions per track
+
+movement:
+  displacement_threshold_px: 15
+  analysis_window_seconds: 2.0
+  zones_rows: 3
+  zones_cols: 3
+
+analytics:
+  write_interval_frames: 5        # push to DB every N processed frames
+  batch_size: 30                   # rows per DB insert call
+  frame_skip: 1                    # process 1 in every N frames (set 3 on Pi)
+
+alerts:
+  threshold_seconds: 5.0           # how long a flagged behaviour must persist before logging an alert
+  classes: [sleep, Using_phone, phone, turn_head]
+
+database:
+  path: data/classroom.db
+  retention_hours: 72              # closed sessions older than this are pruned on dashboard startup
+
+dataset:
+  path: "../Student Behaviour Detection.v1i.yolov8 2"
+  names:
+    0: Using_phone
+    1: bend
+    2: book
+    3: bow_head
+    4: hand-raising
+    5: phone
+    6: raise_head
+    7: reading
+    8: sleep
+    9: turn_head
+    10: upright
+    11: writing

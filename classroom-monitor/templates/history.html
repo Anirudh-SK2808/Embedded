@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% block title %}History — Classroom Monitor{% endblock %}
+{% block content %}
+
+<div class="panel" style="margin-bottom:16px; display:flex; align-items:center; gap:12px;">
+  <label for="session-select" style="color:var(--muted); font-size:13px;">Session</label>
+  <select id="session-select" style="flex:1; max-width:420px;"></select>
+  <span class="sub" id="session-meta"></span>
+  <a id="export-link" href="#" style="text-decoration:none;"><button>Export CSV</button></a>
+</div>
+
+<div id="empty-state" class="empty" style="display:none;">No sessions logged yet — run main.py or start a Live session first.</div>
+
+<div id="content" style="display:none;">
+  <div class="grid cards" style="margin-bottom:16px;">
+    <div class="card"><h3>Peak occupancy</h3><div class="value" id="stat-peak">–</div></div>
+    <div class="card"><h3>Average occupancy</h3><div class="value" id="stat-avg">–</div></div>
+    <div class="card"><h3>People tracked</h3><div class="value" id="stat-tracks">–</div></div>
+    <div class="card"><h3>Entry / exit events</h3><div class="value" id="stat-events">–</div></div>
+    <div class="card"><h3>Alerts</h3><div class="value" id="stat-alerts">–</div></div>
+  </div>
+
+  <div class="grid" style="grid-template-columns: 1fr 1fr; margin-bottom:16px;">
+    <div class="panel">
+      <h2>Behaviour distribution</h2>
+      <canvas id="chart-behaviour" height="220"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Occupancy over time</h2>
+      <canvas id="chart-occupancy" height="220"></canvas>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:16px;">
+    <h2>Zone heatmap</h2>
+    <div id="zone-grid"></div>
+    <div class="empty" id="zone-empty" style="display:none;">No zone data</div>
+  </div>
+
+  <div class="grid" style="grid-template-columns: 1.3fr 1fr; margin-bottom:16px; align-items:start;">
+    <div class="panel">
+      <h2>People</h2>
+      <div style="max-height:360px; overflow:auto;">
+        <table>
+          <thead><tr><th>Track</th><th>First seen</th><th>Last seen</th><th>Dominant</th><th>Alerts</th></tr></thead>
+          <tbody id="people-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="people-empty" style="display:none;">No people logged</div>
+    </div>
+    <div class="panel">
+      <h2>Timeline <span class="sub" id="timeline-track"></span></h2>
+      <canvas id="chart-timeline" height="200"></canvas>
+      <div class="empty" id="timeline-empty">Click a person to see their behaviour timeline</div>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns: 1fr 1fr; margin-bottom:16px; align-items:start;">
+    <div class="panel">
+      <h2>Entry / exit log</h2>
+      <div style="max-height:320px; overflow:auto;">
+        <table>
+          <thead><tr><th>Time</th><th>Track</th><th>Event</th><th>Zone</th></tr></thead>
+          <tbody id="events-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Alerts</h2>
+      <div style="max-height:320px; overflow:auto;">
+        <table>
+          <thead><tr><th>Track</th><th>Behaviour</th><th>Duration</th><th>Detected</th></tr></thead>
+          <tbody id="alerts-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BEHAVIOUR_COLORS = {
+  sleep: "#e2574c", Using_phone: "#e2574c", phone: "#e2574c",
+  turn_head: "#e0a738", bend: "#e0a738",
+  bow_head: "#8a90a0",
+  "hand-raising": "#35c07c", reading: "#35c07c", writing: "#35c07c", book: "#35c07c",
+  raise_head: "#4f8cff", upright: "#4f8cff",
+};
+const ROW_ORDER = ["Front", "Mid", "Back"];
+const COL_ORDER = ["Left", "Center", "Right"];
+
+let behaviourChart = null, occupancyChart = null, timelineChart = null;
+let currentSessionId = null;
+
+function fmtTime(iso) {
+  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+}
+function fmtDuration(s) {
+  if (s == null) return "–";
+  if (s < 60) return `${s.toFixed(0)}s`;
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
+
+async function loadSessions() {
+  const res = await fetch("/api/sessions");
+  const sessions = await res.json();
+  const sel = document.getElementById("session-select");
+  const emptyState = document.getElementById("empty-state");
+  const content = document.getElementById("content");
+
+  if (sessions.length === 0) {
+    emptyState.style.display = "block";
+    content.style.display = "none";
+    return;
+  }
+
+  sel.innerHTML = sessions.map(s =>
+    `<option value="${s.session_id}">${fmtTime(s.start_time)} — ${s.camera_id || "unknown source"}</option>`
+  ).join("");
+
+  sel.addEventListener("change", () => loadSession(sel.value));
+  loadSession(sessions[0].session_id);
+}
+
+async function loadSession(sessionId) {
+  currentSessionId = sessionId;
+  document.getElementById("empty-state").style.display = "none";
+  document.getElementById("content").style.display = "block";
+  document.getElementById("export-link").href = `/api/history/${sessionId}/export.csv`;
+  document.getElementById("timeline-track").textContent = "";
+  if (timelineChart) { timelineChart.destroy(); timelineChart = null; }
+  document.getElementById("timeline-empty").style.display = "block";
+
+  const [summaryRes, occRes, peopleRes, alertsRes] = await Promise.all([
+    fetch(`/api/history/${sessionId}/summary`),
+    fetch(`/api/history/${sessionId}/occupancy`),
+    fetch(`/api/history/${sessionId}/people`),
+    fetch(`/api/history/${sessionId}/alerts`),
+  ]);
+  const summary = await summaryRes.json();
+  const occSeries = await occRes.json();
+  const people = await peopleRes.json();
+  const alerts = await alertsRes.json();
+
+  const occ = summary.latest_occupancy;
+  document.getElementById("stat-peak").textContent = occ ? occ.peak_count : "–";
+  document.getElementById("stat-avg").textContent = occ ? Math.round(occ.average_count * 10) / 10 : "–";
+  document.getElementById("stat-tracks").textContent = summary.track_ids.length;
+  document.getElementById("stat-events").textContent = summary.entry_exit.length;
+  document.getElementById("stat-alerts").textContent = alerts.length;
+
+  // Each panel renders independently — one chart failing (e.g. a library
+  // that didn't load) must not blank out the rest of the page.
+  for (const [label, fn] of [
+    ["behaviour chart", () => renderBehaviourChart(summary.behaviour_distribution)],
+    ["occupancy chart", () => renderOccupancyChart(occSeries)],
+    ["zone grid",        () => renderZoneGrid(summary.zone_counts)],
+    ["events table",     () => renderEvents(summary.entry_exit)],
+    ["people table",     () => renderPeople(people)],
+    ["alerts table",     () => renderAlertsTable(alerts)],
+  ]) {
+    try { fn(); } catch (e) { console.error(`[history] ${label} failed:`, e); }
+  }
+}
+
+function renderBehaviourChart(dist) {
+  const labels = dist.map(d => d.behaviour);
+  const values = dist.map(d => d.count);
+  const colors = labels.map(l => BEHAVIOUR_COLORS[l] || "#4f8cff");
+  const ctx = document.getElementById("chart-behaviour").getContext("2d");
+  if (behaviourChart) behaviourChart.destroy();
+  behaviourChart = new Chart(ctx, {
+    type: "bar",
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }] },
+    options: {
+      indexAxis: "y",
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: "#8a90a0" }, grid: { color: "#262b35" } },
+        y: { ticks: { color: "#e7e9ee" }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+function renderOccupancyChart(series) {
+  const labels = series.map(r => fmtTime(r.timestamp));
+  const values = series.map(r => r.current_count);
+  const ctx = document.getElementById("chart-occupancy").getContext("2d");
+  if (occupancyChart) occupancyChart.destroy();
+  occupancyChart = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets: [{
+      data: values, borderColor: "#4f8cff", backgroundColor: "rgba(79,140,255,0.12)",
+      fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2,
+    }]},
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#8a90a0", maxTicksLimit: 8 }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: "#8a90a0" }, grid: { color: "#262b35" } },
+      },
+    },
+  });
+}
+
+function renderZoneGrid(zoneCounts) {
+  const el = document.getElementById("zone-grid");
+  const empty = document.getElementById("zone-empty");
+  if (!zoneCounts || zoneCounts.length === 0) {
+    el.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+
+  const byZone = {};
+  let rows = new Set(), cols = new Set();
+  for (const z of zoneCounts) {
+    const [row, col] = z.zone.split("-");
+    byZone[z.zone] = z.count;
+    rows.add(row); cols.add(col);
+  }
+  const sortBy = (set, order) => [...set].sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  rows = sortBy(rows, ROW_ORDER);
+  cols = sortBy(cols, COL_ORDER);
+  const max = Math.max(...Object.values(byZone), 1);
+
+  el.style.display = "grid";
+  el.style.gridTemplateColumns = `80px repeat(${cols.length}, 1fr)`;
+  el.style.gap = "6px";
+
+  let html = `<div></div>` + cols.map(c => `<div class="sub" style="text-align:center;">${c}</div>`).join("");
+  for (const r of rows) {
+    html += `<div class="sub" style="display:flex; align-items:center;">${r}</div>`;
+    for (const c of cols) {
+      const count = byZone[`${r}-${c}`] || 0;
+      const alpha = 0.1 + 0.8 * (count / max);
+      html += `<div style="background:rgba(79,140,255,${alpha.toFixed(2)}); border-radius:6px; padding:14px 8px; text-align:center; font-weight:700; font-variant-numeric:tabular-nums;">${count}</div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderEvents(events) {
+  const body = document.getElementById("events-body");
+  if (events.length === 0) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">No entry/exit events</td></tr>`;
+    return;
+  }
+  body.innerHTML = events.slice().reverse().map(e => `
+    <tr>
+      <td>${fmtTime(e.timestamp)}</td>
+      <td>#${e.track_id}</td>
+      <td><span class="pill ${e.event}">${e.event}</span></td>
+      <td>${e.zone || "–"}</td>
+    </tr>
+  `).join("");
+}
+
+function renderAlertsTable(alerts) {
+  const body = document.getElementById("alerts-body");
+  if (alerts.length === 0) {
+    body.innerHTML = `<tr><td colspan="4" class="empty">No alerts</td></tr>`;
+    return;
+  }
+  body.innerHTML = alerts.map(a => `
+    <tr>
+      <td>#${a.track_id}</td>
+      <td><span class="dot" style="background:${BEHAVIOUR_COLORS[a.behaviour] || '#e2574c'}"></span>${a.behaviour}</td>
+      <td>${fmtDuration(a.duration_s)}</td>
+      <td>${fmtTime(a.detected_at)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderPeople(people) {
+  const body = document.getElementById("people-body");
+  const empty = document.getElementById("people-empty");
+  if (!people || people.length === 0) {
+    body.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  body.innerHTML = people.map(p => `
+    <tr class="person-row" data-track="${p.track_id}" style="cursor:pointer;">
+      <td>#${p.track_id}</td>
+      <td>${fmtTime(p.first_seen)}</td>
+      <td>${fmtTime(p.last_seen)}</td>
+      <td><span class="dot" style="background:${BEHAVIOUR_COLORS[p.dominant_behaviour] || '#8a90a0'}"></span>${p.dominant_behaviour || "–"}</td>
+      <td>${p.alert_count}</td>
+    </tr>
+  `).join("");
+
+  body.querySelectorAll(".person-row").forEach(row => {
+    row.addEventListener("click", () => loadTimeline(row.dataset.track));
+  });
+}
+
+async function loadTimeline(trackId) {
+  document.getElementById("timeline-track").textContent = `— #${trackId}`;
+  const res = await fetch(`/api/history/${currentSessionId}/track/${trackId}`);
+  const points = await res.json();
+  const empty = document.getElementById("timeline-empty");
+
+  if (!points || points.length === 0) {
+    empty.style.display = "block";
+    if (timelineChart) { timelineChart.destroy(); timelineChart = null; }
+    return;
+  }
+  empty.style.display = "none";
+
+  const behaviours = [...new Set(points.map(p => p.behaviour))];
+  const labels = points.map(p => fmtTime(p.timestamp));
+  const values = points.map(p => behaviours.indexOf(p.behaviour));
+
+  const ctx = document.getElementById("chart-timeline").getContext("2d");
+  if (timelineChart) timelineChart.destroy();
+  timelineChart = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets: [{
+      data: values, stepped: true, borderColor: "#4f8cff",
+      pointRadius: 0, borderWidth: 2,
+    }]},
+    options: {
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => behaviours[ctx.raw] } } },
+      scales: {
+        x: { ticks: { color: "#8a90a0", maxTicksLimit: 6 }, grid: { display: false } },
+        y: {
+          ticks: {
+            color: "#8a90a0",
+            callback: (v) => behaviours[v] ?? "",
+            stepSize: 1,
+          },
+          min: -0.5, max: behaviours.length - 0.5,
+          grid: { color: "#262b35" },
+        },
+      },
+    },
+  });
+}
+
+loadSessions();
+</script>
+{% endblock %}

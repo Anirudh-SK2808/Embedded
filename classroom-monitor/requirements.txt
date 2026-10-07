@@ -1,0 +1,10 @@
+ultralytics>=8.2.0
+opencv-python>=4.10.0
+numpy>=1.26.0
+scipy>=1.13.0
+pyyaml>=6.0.0
+Pillow>=10.0.0
+boxmot>=10.8.0
+torch>=2.0.0
+torchvision>=0.15.0
+Flask>=3.0.0

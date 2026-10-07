@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %}Live — Classroom Monitor{% endblock %}
+{% block content %}
+
+<div class="grid" style="grid-template-columns: 2fr 1fr; align-items: start;">
+
+  <div class="grid" style="gap:16px;">
+    <div class="panel">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <h2 style="margin:0; display:flex; align-items:center;">
+          <span class="dot status-off" id="status-dot"></span>
+          <span id="status-text">Stopped</span>
+        </h2>
+        <div style="display:flex; gap:8px;">
+          <button class="primary" id="btn-start">Start</button>
+          <button class="danger" id="btn-stop" disabled>Stop</button>
+        </div>
+      </div>
+      <div style="background:#000; border-radius:8px; overflow:hidden; aspect-ratio:4/3; display:flex; align-items:center; justify-content:center;">
+        <img id="feed" src="" style="max-width:100%; max-height:100%; display:none;">
+        <span id="feed-empty" class="empty">Camera is off — press Start</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>People (live)</h2>
+      <div style="max-height:320px; overflow:auto;">
+        <table>
+          <thead><tr><th>Track</th><th>Behaviour</th><th>Duration</th><th>Zone</th><th>Conf.</th></tr></thead>
+          <tbody id="roster-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="roster-empty" style="display:none;">No active tracks yet</div>
+    </div>
+  </div>
+
+  <div class="grid" style="gap:16px;">
+    <div class="grid cards" style="grid-template-columns: 1fr 1fr;">
+      <div class="card">
+        <h3>Active</h3>
+        <div class="value" id="stat-active">–</div>
+        <div class="sub">tracked people</div>
+      </div>
+      <div class="card">
+        <h3>Peak</h3>
+        <div class="value" id="stat-peak">–</div>
+        <div class="sub">this session</div>
+      </div>
+      <div class="card" style="grid-column: span 2;">
+        <h3>Engagement</h3>
+        <div class="value" id="stat-engagement">–</div>
+        <div class="sub">share of active people reading / writing / upright / hand-raising</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Behaviour mix</h2>
+      <canvas id="chart-behaviour" height="200"></canvas>
+      <div class="empty" id="behaviour-empty" style="display:none;">No active tracks yet</div>
+    </div>
+
+    <div class="panel">
+      <h2>Alerts</h2>
+      <div style="max-height:220px; overflow:auto;" id="alerts-list"></div>
+      <div class="empty" id="alerts-empty">No sustained flags yet</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const BEHAVIOUR_COLORS = {
+  sleep: "#e2574c", Using_phone: "#e2574c", phone: "#e2574c",
+  turn_head: "#e0a738", bend: "#e0a738",
+  bow_head: "#8a90a0",
+  "hand-raising": "#35c07c", reading: "#35c07c", writing: "#35c07c", book: "#35c07c",
+  raise_head: "#4f8cff", upright: "#4f8cff",
+};
+
+function fmtDuration(s) {
+  if (s == null) return "–";
+  if (s < 60) return `${s.toFixed(0)}s`;
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
+
+let chart = null;
+function ensureChart(labels, values) {
+  const ctx = document.getElementById("chart-behaviour").getContext("2d");
+  const colors = labels.map(l => BEHAVIOUR_COLORS[l] || "#4f8cff");
+  if (!chart) {
+    chart = new Chart(ctx, {
+      type: "bar",
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }] },
+      options: {
+        indexAxis: "y",
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { color: "#8a90a0" }, grid: { color: "#262b35" } },
+          y: { ticks: { color: "#e7e9ee" }, grid: { display: false } },
+        },
+      },
+    });
+  } else {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = values;
+    chart.data.datasets[0].backgroundColor = colors;
+    chart.update("none");
+  }
+}
+
+const feedImg = document.getElementById("feed");
+const feedEmpty = document.getElementById("feed-empty");
+const statusDot = document.getElementById("status-dot");
+const statusText = document.getElementById("status-text");
+const btnStart = document.getElementById("btn-start");
+const btnStop = document.getElementById("btn-stop");
+
+function setRunningUI(running) {
+  statusDot.className = "dot " + (running ? "status-live" : "status-off");
+  statusText.textContent = running ? "Live" : "Stopped";
+  btnStart.disabled = running;
+  btnStop.disabled = !running;
+  feedImg.style.display = running ? "block" : "none";
+  feedEmpty.style.display = running ? "none" : "block";
+  feedImg.src = running ? "/video_feed?" + Date.now() : "";
+}
+
+btnStart.addEventListener("click", async () => {
+  btnStart.disabled = true;
+  await fetch("/api/live/start", { method: "POST" });
+  setRunningUI(true);
+});
+
+btnStop.addEventListener("click", async () => {
+  btnStop.disabled = true;
+  await fetch("/api/live/stop", { method: "POST" });
+  setRunningUI(false);
+});
+
+function renderRoster(roster) {
+  const body = document.getElementById("roster-body");
+  const empty = document.getElementById("roster-empty");
+  if (!roster || roster.length === 0) {
+    body.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  body.innerHTML = roster.slice().sort((a, b) => a.track_id - b.track_id).map(r => `
+    <tr>
+      <td>#${r.track_id}</td>
+      <td><span class="dot" style="background:${BEHAVIOUR_COLORS[r.behaviour] || '#8a90a0'}"></span>${r.behaviour || "–"}</td>
+      <td>${fmtDuration(r.duration_s)}</td>
+      <td>${r.zone || "–"}</td>
+      <td>${(r.confidence * 100).toFixed(0)}%</td>
+    </tr>
+  `).join("");
+}
+
+function renderAlerts(alerts) {
+  const list = document.getElementById("alerts-list");
+  const empty = document.getElementById("alerts-empty");
+  if (!alerts || alerts.length === 0) {
+    list.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  list.innerHTML = alerts.map(a => `
+    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--panel-border); font-size:13px;">
+      <span><span class="dot" style="background:${BEHAVIOUR_COLORS[a.behaviour] || '#e2574c'}"></span>#${a.track_id} — ${a.behaviour}</span>
+      <span class="sub">${fmtDuration(a.duration_s)}</span>
+    </div>
+  `).join("");
+}
+
+async function poll() {
+  try {
+    const res = await fetch("/api/live/stats");
+    const s = await res.json();
+    setRunningUI(s.running);
+    if (s.running) {
+      const roster = s.roster || [];
+      // Shows roster.length (who's actually in this frame), not the
+      // registry's broader active_tracks count, which also includes
+      // tracks the detector momentarily missed but hasn't expired yet —
+      // using that here looked like a bug (e.g. "Active: 2" over a
+      // 1-row table) even though both numbers were individually correct.
+      document.getElementById("stat-active").textContent = roster.length;
+      document.getElementById("stat-peak").textContent = s.occupancy ? s.occupancy.peak : "–";
+      document.getElementById("stat-engagement").textContent =
+        s.engagement_pct != null ? `${s.engagement_pct}%` : "–";
+
+      renderRoster(roster);
+      renderAlerts(s.recent_alerts || []);
+
+      const counts = {};
+      for (const r of roster) {
+        if (!r.behaviour) continue;
+        counts[r.behaviour] = (counts[r.behaviour] || 0) + 1;
+      }
+      const labels = Object.keys(counts);
+      const empty = document.getElementById("behaviour-empty");
+      if (labels.length === 0) {
+        empty.style.display = "block";
+      } else {
+        empty.style.display = "none";
+        ensureChart(labels, labels.map(l => counts[l]));
+      }
+    }
+  } catch (e) { console.error("[live] poll failed:", e); }
+}
+
+setInterval(poll, 1000);
+poll();
+</script>
+{% endblock %}

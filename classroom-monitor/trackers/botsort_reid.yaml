@@ -1,0 +1,24 @@
+# BoT-SORT with ReID enabled — appearance-based re-identification so a
+# person who's briefly lost (occlusion, a flicker in detection confidence)
+# gets matched back to their existing track_id instead of ByteTrack-style
+# motion-only tracking minting a brand new ID. Heavier per-frame cost than
+# bytetrack.yaml (an extra embedding pass per box) — worth it for accurate
+# person-level analytics, but weigh against Pi throughput if it bites.
+#
+# Copied from ultralytics' bundled botsort.yaml; only track_buffer,
+# with_reid, and this header differ from the shipped default.
+
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 90        # was 30 — more tolerance for brief detection gaps before giving up on an ID
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: True          # was False — this is the actual fix for "same person, new ID"
+model: auto

@@ -1,0 +1,17 @@
+names:
+- Using_phone
+- bend
+- book
+- bow_head
+- hand-raising
+- phone
+- raise_head
+- reading
+- sleep
+- turn_head
+- upright
+- writing
+nc: 12
+test: /Users/anirudh_44/Desktop/Embedded/Student Behaviour Detection.v1i.yolov8 2/test/images
+train: /Users/anirudh_44/Desktop/Embedded/Student Behaviour Detection.v1i.yolov8 2/train/images
+val: /Users/anirudh_44/Desktop/Embedded/Student Behaviour Detection.v1i.yolov8 2/valid/images
