@@ -1,0 +1,64 @@
+# Runtime config tuned for Raspberry Pi 5 (8GB) CPU-only inference.
+# Copy this over classroom-monitor/config.yaml on the Pi once the NCNN
+# model has been exported and transferred.
+
+camera:
+  source: 0
+  width: 640
+  height: 480
+  fps: 30
+  queue_depth: 4
+
+model:
+  weights: models/pi/behaviour_detector_v2   # NCNN export directory (see export_pi.py)
+  confidence_threshold: 0.40
+  iou_threshold: 0.45
+  imgsz: 640
+  device: cpu
+
+tracking:
+  tracker: bytetrack                # lighter than botsort+reid — cheaper on CPU
+  tracker_config: trackers/bytetrack_wide_buffer.yaml
+  max_ids: 50
+  track_expiry_frames: 90
+
+behaviour:
+  smoothing_window: 5
+
+movement:
+  displacement_threshold_px: 15
+  analysis_window_seconds: 2.0
+  zones_rows: 3
+  zones_cols: 3
+
+analytics:
+  write_interval_frames: 5
+  batch_size: 30
+  # Detector runs on 1 of every N frames; bytetrack interpolates the rest.
+  # yolo11s on Pi5 CPU (NCNN int8) runs a few fps — frame_skip=3-5 keeps
+  # the apparent tracking rate smooth without needing the detector itself
+  # to hit 30fps.
+  frame_skip: 4
+
+alerts:
+  threshold_seconds: 5.0
+  classes: [sleep, phone, turn_head]   # "Using_phone" merged into "phone"
+
+database:
+  path: data/classroom.db
+  retention_hours: 72
+
+dataset:
+  path: "../pi-deploy/dataset"
+  names:
+    0: phone
+    1: bend
+    2: book
+    3: bow_head
+    4: hand-raising
+    5: raise_head
+    6: reading
+    7: sleep
+    8: turn_head
+    9: upright
+    10: writing
