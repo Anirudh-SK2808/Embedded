@@ -1,0 +1,18 @@
+# ByteTrack tuned for Raspberry Pi 4 processing rates (~2-3 fps at 480x832).
+#
+# track_buffer counts *processed* frames, not seconds. 30 frames at Pi
+# rates is ~10-15 s of patience for an occluded student — the same
+# real-world tolerance the desktop config gets from 90 frames at ~30 fps.
+# Keep it equal to config.pi.yaml's tracking.track_expiry_frames so the
+# registry and the tracker give up on a lost track at the same moment.
+#
+# Copied from ultralytics' bundled bytetrack.yaml; only track_buffer and
+# this header differ from the shipped default.
+
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True

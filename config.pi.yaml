@@ -1,0 +1,50 @@
+# Raspberry Pi 4 (8 GB) config — NCNN FP16 model on the CPU, Pi Camera Module.
+#
+#   python app.py  --config config.pi.yaml        # dashboard on http://<pi-ip>:5050
+#   python main.py --config config.pi.yaml --no-display
+
+camera:
+  backend: auto                    # picamera2 for "picamera", OpenCV for anything else
+  source: picamera                 # Pi Camera Module. USB webcam: 0
+  width: 1280                      # 16:9 to match the training images
+  height: 720
+  fps: 15                          # the detector runs a few fps; capturing faster only burns CPU
+
+model:
+  weights: models/pi/behaviour_yolo26n_ncnn_model   # produced by training/export_pi.py
+  confidence_threshold: 0.39       # F1-optimal on val (evaluate.py --split val, run 2026-10-27)
+  iou_threshold: 0.45              # NMS IoU (applied: predict uses the NMS head on .pt and NCNN alike)
+  imgsz: [480, 832]                # [h, w] — MUST match the export size (NCNN input is fixed)
+  device: cpu
+
+tracking:
+  tracker: bytetrack               # BoT-SORT + ReID is too heavy for a Pi 4 CPU
+  tracker_config: trackers/bytetrack_pi.yaml
+  max_ids: 50
+  track_expiry_frames: 30          # = track_buffer in trackers/bytetrack_pi.yaml
+
+behaviour:
+  smoothing_window: 3              # fewer, slower frames on the Pi — 3 is ~1 s of history
+
+movement:
+  displacement_threshold_px: 30
+  analysis_window_seconds: 2.0
+  zones_rows: 3
+  zones_cols: 3
+
+analytics:
+  write_interval_frames: 5
+  batch_size: 30
+  frame_skip: 1                    # capture is latest-frame-only, so the detector skips naturally
+  max_fps: 2                       # cap processing to keep the Pi cool (0 = no cap). Below ~1 hurts tracking
+
+alerts:
+  threshold_seconds: 5.0
+  classes: [sleep, Using_phone, turn_head]
+
+dashboard:
+  stream_width: 640
+
+database:
+  path: data/classroom.db
+  retention_hours: 72

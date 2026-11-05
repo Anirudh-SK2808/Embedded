@@ -1,0 +1,15 @@
+# ByteTrack with a wider lost-track buffer than ultralytics' shipped
+# default (30 -> 90 frames) — a cheap mitigation for ID churn on its own
+# (no re-identification, just more patience before giving up), kept here
+# in case tracking.tracker is ever switched back from botsort.
+#
+# Copied from ultralytics' bundled bytetrack.yaml; only track_buffer and
+# this header differ from the shipped default.
+
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 90        # was 30
+match_thresh: 0.8
+fuse_score: True

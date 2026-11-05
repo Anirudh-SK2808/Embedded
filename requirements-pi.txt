@@ -1,0 +1,16 @@
+# Raspberry Pi 4 runtime (64-bit Raspberry Pi OS). picamera2 comes from apt
+# (python3-picamera2), not pip — see setup_pi.sh.
+
+# CPU-only torch. PyPI's default aarch64 Linux torch is the CUDA build
+# (454 MB + several GB of nvidia-*/cuda-toolkit/triton packages) — useless
+# on a Pi. The +cpu builds (~160 MB, no nvidia deps) only exist on PyTorch's
+# own index. torch 2.14.1 is the version the model was exported with.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+
+ultralytics==8.4.155        # same version the model was exported with
+ncnn                        # NCNN runtime for the exported model
+lap                         # ByteTrack assignment (ultralytics tracker)
+pyyaml>=6.0.0
+Flask>=3.0.0

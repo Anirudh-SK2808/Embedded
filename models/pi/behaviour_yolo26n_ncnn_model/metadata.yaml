@@ -1,0 +1,31 @@
+description: Ultralytics YOLO26n model trained on /home/arvinsamuela/Embedded/Embedded
+  2/dataset/data.yaml
+author: Ultralytics
+date: '2026-10-27T16:56:00.539540+05:30'
+version: 8.4.155
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+head: Detect
+batch: 1
+imgsz:
+- 480
+- 832
+names:
+  0: Using_phone
+  1: bend
+  2: book
+  3: bow_head
+  4: hand-raising
+  5: raise_head
+  6: reading
+  7: sleep
+  8: turn_head
+  9: upright
+  10: writing
+args:
+  batch: 1
+  quantize: 16
+channels: 3
+end2end: false
